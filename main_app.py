@@ -243,7 +243,7 @@ def render_file_upload():
     
     # 文件上传
     uploaded_files = st.file_uploader(
-        "选择PDF文件（最多20个）",
+        "选择PDF文件（无限制，建议先尝试少量，结果满意再批量）",
         type=FILE_CONFIG["supported_formats"],
         accept_multiple_files=True,
         help="支持同时上传多个PDF文件",
