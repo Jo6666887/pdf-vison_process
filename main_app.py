@@ -639,7 +639,7 @@ def render_image_upload_and_parse():
                 # 显示图片
                 try:
                     image = Image.open(selected_image)
-                    st.image(image, use_column_width=True)
+                    st.image(image, use_container_width=True)
                     
                     # 图片信息
                     st.info(f"尺寸: {image.size[0]}×{image.size[1]} | 格式: {image.format}")

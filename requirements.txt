@@ -1,8 +1,19 @@
-streamlit==1.38.0
-pdf2image==1.17.0
-Pillow==10.4.0
-openai==1.51.0
-python-dotenv==1.0.1
-pandas==2.1.4
-psutil==5.9.6
-pathlib2==2.3.7
+# PDF智能解析工具依赖库
+
+# 核心框架
+streamlit>=1.38.0
+
+# PDF处理
+pdf2image>=1.17.0
+
+# 图片处理
+Pillow>=10.4.0
+
+# AI API客户端
+openai>=1.40.0
+
+# 数据处理
+pandas>=2.1.0
+
+# 系统信息
+psutil>=5.9.0
