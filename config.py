@@ -9,7 +9,7 @@ from pathlib import Path
 ARK_API_CONFIG = {
     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
     "model": "ep-20250425135316-55rdv",
-    "default_api_key": "acdbc611-f206-416e-afaa-331d1fbcff88"
+    "default_api_key": ""
 }
 
 # 文件处理配置
