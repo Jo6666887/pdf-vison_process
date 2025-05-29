@@ -10,101 +10,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 
-import pdf2image
 from PIL import Image
 from openai import OpenAI
 import streamlit as st
 
 from config import ARK_API_CONFIG, ERROR_MESSAGES, SUCCESS_MESSAGES
-
-
-class PDFProcessor:
-    """PDF处理器"""
-    
-    def __init__(self, dpi: int = 200):
-        self.dpi = dpi
-    
-    def split_pdf_to_images(self, pdf_path: Path, output_dir: Path, progress_callback=None, status_callback=None) -> List[Path]:
-        """将PDF拆分为图片，支持进度回调"""
-        try:
-            # 首先获取PDF总页数
-            if status_callback:
-                status_callback("📊 正在检查PDF页数...")
-            
-            # 快速获取页数（使用低DPI）
-            temp_images = pdf2image.convert_from_path(pdf_path, dpi=72, last_page=1)
-            total_pages = len(pdf2image.convert_from_path(pdf_path, dpi=72))
-            
-            if status_callback:
-                status_callback(f"📄 PDF共有 {total_pages} 页，开始转换...")
-            
-            saved_images = []
-            
-            # 分批处理，避免内存占用过大
-            batch_size = 5  # 每批处理5页
-            
-            for start_page in range(1, total_pages + 1, batch_size):
-                end_page = min(start_page + batch_size - 1, total_pages)
-                
-                if status_callback:
-                    status_callback(f"🔄 转换第 {start_page}-{end_page} 页...")
-                
-                # 转换当前批次的页面
-                batch_images = pdf2image.convert_from_path(
-                    pdf_path, 
-                    dpi=self.dpi,
-                    fmt='png',
-                    first_page=start_page,
-                    last_page=end_page,
-                    thread_count=2,
-                    use_cropbox=True,
-                    grayscale=False,
-                    transparent=False
-                )
-                
-                # 保存当前批次的图片
-                for i, image in enumerate(batch_images):
-                    page_num = start_page + i
-                    image_path = output_dir / f"{page_num}.png"
-                    
-                    # 优化图片保存
-                    image.save(image_path, "PNG", optimize=True, compress_level=6)
-                    saved_images.append(image_path)
-                    
-                    # 更新进度
-                    if progress_callback:
-                        progress = page_num / total_pages
-                        progress_callback(progress)
-                    
-                    if status_callback:
-                        status_callback(f"💾 已保存第 {page_num}/{total_pages} 页")
-            
-            if status_callback:
-                status_callback(f"✅ 完成！共转换 {len(saved_images)} 页")
-            
-            return saved_images
-            
-        except Exception as e:
-            if status_callback:
-                status_callback(f"❌ 转换失败: {str(e)}")
-            st.error(f"PDF拆分失败: {str(e)}")
-            return []
-    
-    def get_pdf_info(self, pdf_path: Path) -> Dict:
-        """获取PDF信息"""
-        try:
-            # 获取页数
-            images = pdf2image.convert_from_path(pdf_path, dpi=72, last_page=1)
-            
-            # 使用pdfinfo获取更多信息（如果可用）
-            info = {
-                'pages': len(pdf2image.convert_from_path(pdf_path, dpi=72)),
-                'file_size': pdf_path.stat().st_size,
-                'created_time': datetime.fromtimestamp(pdf_path.stat().st_ctime)
-            }
-            return info
-        except Exception as e:
-            return {'error': str(e)}
 
 
 class AIParser:
