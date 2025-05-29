@@ -12,12 +12,109 @@ import base64
 from PIL import Image
 import io
 
+# 尝试导入PyMuPDF
+try:
+    import fitz  # PyMuPDF - 纯Python库，无需系统依赖
+except ImportError:
+    fitz = None
+
 # 导入自定义模块
 from config import (
     UI_CONFIG, FILE_CONFIG, CONCURRENCY_CONFIG, OUTPUT_CONFIG, 
     PRESET_PROMPTS, ERROR_MESSAGES, SUCCESS_MESSAGES, ARK_API_CONFIG
 )
-from utils import PDFProcessor, AIParser, FileManager, ProgressTracker, validate_api_key, format_file_size
+from utils import AIParser, FileManager, ProgressTracker, validate_api_key, format_file_size
+
+# 定义新的PDF处理器类（使用PyMuPDF，无需系统依赖）
+class PDFProcessor:
+    """PDF处理器 - 使用PyMuPDF（纯Python实现）"""
+    
+    def __init__(self, dpi: int = 200):
+        if fitz is None:
+            st.error("❌ 缺少PyMuPDF库！请确保requirements.txt包含PyMuPDF>=1.23.0")
+            st.stop()
+        self.dpi = dpi
+    
+    def split_pdf_to_images(self, pdf_path: Path, output_dir: Path, progress_callback=None, status_callback=None):
+        """将PDF拆分为图片，支持进度回调"""
+        try:
+            # 打开PDF文件
+            if status_callback:
+                status_callback("📊 正在打开PDF文件...")
+            
+            pdf_document = fitz.open(str(pdf_path))
+            total_pages = len(pdf_document)
+            
+            if status_callback:
+                status_callback(f"📄 PDF共有 {total_pages} 页，开始转换...")
+            
+            saved_images = []
+            
+            # 计算缩放比例（PyMuPDF默认是72 DPI）
+            zoom = self.dpi / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # 处理每一页
+            for page_num in range(total_pages):
+                if status_callback:
+                    status_callback(f"🔄 转换第 {page_num + 1}/{total_pages} 页...")
+                
+                # 获取页面
+                page = pdf_document[page_num]
+                
+                # 渲染页面为图片
+                pix = page.get_pixmap(matrix=mat)
+                
+                # 转换为PIL Image
+                img_data = pix.tobytes("png")
+                img = Image.open(io.BytesIO(img_data))
+                
+                # 释放pixmap内存
+                pix = None
+                
+                # 保存图片
+                image_path = output_dir / f"{page_num + 1}.png"
+                img.save(image_path, "PNG", optimize=True, compress_level=6)
+                saved_images.append(image_path)
+                
+                # 释放图片内存
+                img.close()
+                
+                # 更新进度
+                if progress_callback:
+                    progress = (page_num + 1) / total_pages
+                    progress_callback(progress)
+                
+                if status_callback:
+                    status_callback(f"💾 已保存第 {page_num + 1}/{total_pages} 页")
+            
+            # 关闭PDF文档
+            pdf_document.close()
+            
+            if status_callback:
+                status_callback(f"✅ 完成！共转换 {len(saved_images)} 页")
+            
+            return saved_images
+            
+        except Exception as e:
+            if status_callback:
+                status_callback(f"❌ 转换失败: {str(e)}")
+            st.error(f"PDF拆分失败: {str(e)}")
+            return []
+    
+    def get_pdf_info(self, pdf_path: Path) -> dict:
+        """获取PDF信息"""
+        try:
+            pdf_document = fitz.open(str(pdf_path))
+            info = {
+                'pages': len(pdf_document),
+                'file_size': pdf_path.stat().st_size,
+                'created_time': datetime.fromtimestamp(pdf_path.stat().st_ctime)
+            }
+            pdf_document.close()
+            return info
+        except Exception as e:
+            return {'error': str(e)}
 
 # 页面配置
 st.set_page_config(
