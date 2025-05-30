@@ -116,6 +116,99 @@ class PDFProcessor:
         except Exception as e:
             return {'error': str(e)}
 
+# 图片处理工具类
+class ImageProcessor:
+    """图片处理工具 - 处理格式转换、压缩等"""
+    
+    @staticmethod
+    def process_uploaded_image(uploaded_file, max_size_mb=10):
+        """
+        处理上传的图片：统一格式、压缩大文件
+        
+        Args:
+            uploaded_file: Streamlit上传的文件对象
+            max_size_mb: 最大文件大小(MB)
+            
+        Returns:
+            tuple: (processed_image_bytes, file_info)
+        """
+        try:
+            # 获取原始文件信息
+            original_size = len(uploaded_file.getvalue())
+            original_size_mb = original_size / (1024 * 1024)
+            
+            # 打开图片
+            image = Image.open(uploaded_file)
+            
+            # 转换为RGB模式（确保兼容性）
+            if image.mode in ['RGBA', 'P']:
+                # 创建白色背景
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                if image.mode == 'P':
+                    image = image.convert('RGBA')
+                background.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
+                image = background
+            elif image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # 文件信息
+            file_info = {
+                'original_size_mb': round(original_size_mb, 2),
+                'original_dimensions': image.size,
+                'format': uploaded_file.name.split('.')[-1].upper(),
+                'compressed': False,
+                'compression_ratio': 1.0
+            }
+            
+            # 如果文件太大，进行压缩
+            if original_size_mb > max_size_mb:
+                st.warning(f"📦 文件大小 {original_size_mb:.1f}MB 超过限制，正在自动压缩...")
+                
+                # 计算压缩比例
+                target_ratio = max_size_mb / original_size_mb
+                scale_factor = min(0.8, target_ratio ** 0.5)  # 保守压缩
+                
+                # 调整尺寸
+                new_width = int(image.size[0] * scale_factor)
+                new_height = int(image.size[1] * scale_factor)
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                file_info.update({
+                    'compressed': True,
+                    'new_dimensions': image.size,
+                    'scale_factor': round(scale_factor, 3)
+                })
+            
+            # 转换为PNG字节流
+            img_byte_arr = io.BytesIO()
+            
+            # 根据压缩需求调整质量
+            if original_size_mb > max_size_mb:
+                # 使用更高压缩
+                image.save(img_byte_arr, format='PNG', optimize=True, compress_level=9)
+            else:
+                # 标准压缩
+                image.save(img_byte_arr, format='PNG', optimize=True, compress_level=6)
+            
+            processed_bytes = img_byte_arr.getvalue()
+            processed_size_mb = len(processed_bytes) / (1024 * 1024)
+            
+            # 更新文件信息
+            file_info.update({
+                'processed_size_mb': round(processed_size_mb, 2),
+                'compression_ratio': round(original_size_mb / processed_size_mb, 2) if processed_size_mb > 0 else 1.0
+            })
+            
+            # 显示压缩信息
+            if file_info['compressed']:
+                st.success(f"✅ 压缩完成：{original_size_mb:.1f}MB → {processed_size_mb:.1f}MB (压缩率: {file_info['compression_ratio']:.1f}x)")
+            
+            return processed_bytes, file_info
+            
+        except Exception as e:
+            st.error(f"图片处理失败: {str(e)}")
+            return None, None
+
 # 页面配置
 st.set_page_config(
     page_title=UI_CONFIG["page_title"],
@@ -666,7 +759,7 @@ def render_image_upload_and_parse():
         "上传图片文件进行AI解析",
         type=['png', 'jpg', 'jpeg', 'gif', 'bmp'],
         accept_multiple_files=True,
-        help="支持多种图片格式，无数量限制",
+        help="✨ 支持多种图片格式，无数量限制！超过10MB的图片会自动压缩优化",
         key="image_uploader"
     )
     
@@ -794,48 +887,68 @@ def render_image_upload_and_parse():
 
 def parse_single_image_display(uploaded_file, prompt, api_key, page_num):
     """解析单张图片并显示结果"""
-    with st.spinner("🤖 AI解析中..."):
+    with st.spinner("🔄 处理图片中..."):
         try:
-            # 创建AI解析器
-            ai_parser = AIParser(api_key=api_key, timeout=60)
+            # 处理上传的图片（统一格式、压缩）
+            processed_bytes, file_info = ImageProcessor.process_uploaded_image(uploaded_file, max_size_mb=10)
             
-            # 转换图片为base64
-            image_bytes = uploaded_file.getvalue()
-            base64_image = base64.b64encode(image_bytes).decode('utf-8')
+            if processed_bytes is None:
+                st.error("❌ 图片处理失败")
+                return None
             
-            # 构建消息
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
+            # 显示处理信息
+            if file_info:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("原始大小", f"{file_info['original_size_mb']} MB")
+                with col2:
+                    st.metric("处理后大小", f"{file_info['processed_size_mb']} MB")
+                with col3:
+                    if file_info['compressed']:
+                        st.metric("压缩率", f"{file_info['compression_ratio']:.1f}x", delta="已压缩")
+                    else:
+                        st.metric("状态", "无需压缩", delta="✓")
+            
+            with st.spinner("🤖 AI解析中..."):
+                # 创建AI解析器
+                ai_parser = AIParser(api_key=api_key, timeout=60)
+                
+                # 转换为base64
+                base64_image = base64.b64encode(processed_bytes).decode('utf-8')
+                
+                # 构建消息（统一使用PNG格式）
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
+                                },
                             },
-                        },
-                        {
-                            "type": "text", 
-                            "text": f"这是第{page_num}张图片。{prompt}"
-                        },
-                    ],
-                }
-            ]
-            
-            # 调用API
-            client = ai_parser.create_client()
-            response = client.chat.completions.create(
-                model=ai_parser.model,
-                messages=messages,
-                max_tokens=4096,
-                temperature=0.7,
-                top_p=0.9
-            )
-            
-            result = response.choices[0].message.content
-            st.success("✅ 解析完成！")
-            return result
-            
+                            {
+                                "type": "text", 
+                                "text": f"这是第{page_num}张图片。{prompt}"
+                            },
+                        ],
+                    }
+                ]
+                
+                # 调用API
+                client = ai_parser.create_client()
+                response = client.chat.completions.create(
+                    model=ai_parser.model,
+                    messages=messages,
+                    max_tokens=4096,
+                    temperature=0.7,
+                    top_p=0.9
+                )
+                
+                result = response.choices[0].message.content
+                st.success("✅ 解析完成！")
+                return result
+                
         except Exception as e:
             st.error(f"❌ 解析失败: {str(e)}")
             return None
