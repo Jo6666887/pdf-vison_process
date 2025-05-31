@@ -805,8 +805,9 @@ def render_image_upload_and_parse():
             key="img_prompt"
         )
         
-        # 批量解析状态显示和控制
+        # ==================== 顶部：控制区域 ====================
         st.markdown("---")
+        st.markdown("### 🎛️ 解析控制")
         
         # 解析控制按钮
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -839,7 +840,7 @@ def render_image_upload_and_parse():
                 st.success("✅ 已清空所有解析结果")
                 st.rerun()
         
-        # 批量解析进度显示
+        # ==================== 顶部：进度显示区域 ====================
         if st.session_state.batch_parsing or st.session_state.batch_completed > 0:
             st.markdown("### 📊 批量解析进度")
             
@@ -874,111 +875,155 @@ def render_image_upload_and_parse():
         if st.session_state.batch_parsing:
             continue_batch_parsing(uploaded_images, prompt, api_key)
         
-        # 主要预览区域 - 左右分栏布局
+        # ==================== 底部：主要预览区域 ====================
         st.markdown("---")
         st.markdown("### 🔍 图片预览与解析结果")
         
-        # 图片选择器（始终可用）
+        # 图片导航器 - 使用滑块进行选择
         if len(uploaded_images) > 1:
-            # 创建图片选择选项，标记已解析的图片
-            image_options = []
+            # 创建图片状态显示
+            status_text = ""
             for i, img in enumerate(uploaded_images):
-                status_icon = "✅" if img.name in st.session_state.image_results else "⏳"
-                if st.session_state.batch_parsing and i == st.session_state.batch_completed:
+                if img.name in st.session_state.image_results:
+                    status_icon = "✅"
+                elif st.session_state.batch_parsing and i == st.session_state.batch_completed:
                     status_icon = "🔄"
-                image_options.append(f"{status_icon} {img.name}")
+                else:
+                    status_icon = "⏳"
+                status_text += f"{status_icon} "
             
-            selected_display = st.selectbox(
-                "选择要预览的图片",
-                options=image_options,
-                key="selected_image_display"
+            st.markdown(f"**图片状态：** {status_text}")
+            st.markdown("*✅已完成 🔄解析中 ⏳待解析*")
+            
+            # 滑块选择器
+            selected_idx = st.slider(
+                "选择图片进行预览",
+                min_value=0,
+                max_value=len(uploaded_images) - 1,
+                value=0,
+                format=f"第 %d 张 - {uploaded_images[0].name if len(uploaded_images) > 0 else ''}",
+                key="image_slider"
             )
             
-            # 从显示文本中提取实际索引
-            selected_idx = image_options.index(selected_display)
+            # 动态更新滑块标签
+            if selected_idx < len(uploaded_images):
+                current_image = uploaded_images[selected_idx]
+                status_icon = "✅" if current_image.name in st.session_state.image_results else ("🔄" if st.session_state.batch_parsing and selected_idx == st.session_state.batch_completed else "⏳")
+                st.markdown(f"**当前选择：** {status_icon} 第 {selected_idx + 1} 张 - {current_image.name}")
         else:
             selected_idx = 0
         
-        # 左右分栏显示
+        # ==================== 底部：左右分栏显示 ====================
         if selected_idx < len(uploaded_images):
             selected_image = uploaded_images[selected_idx]
             
-            # 左右分栏
+            # 左右分栏 - 1:1 比例
             left_col, right_col = st.columns([1, 1])
             
-            # 左侧：图片预览
+            # ========== 左侧：图片预览区域 ==========
             with left_col:
-                st.subheader(f"📷 {selected_image.name}")
+                st.markdown("#### 📷 图片预览")
                 
-                # 显示图片
-                try:
-                    image = Image.open(selected_image)
-                    st.image(image, use_container_width=True)
+                # 图片信息卡片
+                with st.container():
+                    st.markdown(f"**文件名：** {selected_image.name}")
                     
-                    # 图片信息
-                    st.info(f"尺寸: {image.size[0]}×{image.size[1]} | 格式: {image.format}")
-                    
-                    # 单张解析按钮（只在非批量解析时显示）
-                    if not st.session_state.batch_parsing:
-                        if st.button(f"🔍 解析此图片", key=f"parse_single_{selected_idx}"):
-                            with st.spinner("解析中..."):
-                                result = parse_single_image_display(selected_image, prompt, api_key, selected_idx + 1)
-                                if result:
-                                    st.session_state.image_results[selected_image.name] = result
-                                    st.success("✅ 解析完成！")
-                                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"图片加载失败: {e}")
+                    # 显示图片
+                    try:
+                        image = Image.open(selected_image)
+                        st.image(image, use_container_width=True, caption=f"第 {selected_idx + 1} 张图片")
+                        
+                        # 图片详细信息
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("尺寸", f"{image.size[0]}×{image.size[1]}")
+                        with col2:
+                            st.metric("格式", image.format or "未知")
+                        
+                        # 单张解析按钮
+                        if not st.session_state.batch_parsing:
+                            if st.button(f"🔍 单独解析此图片", key=f"parse_single_{selected_idx}", use_container_width=True):
+                                with st.spinner("解析中..."):
+                                    result = parse_single_image_display(selected_image, prompt, api_key, selected_idx + 1)
+                                    if result:
+                                        st.session_state.image_results[selected_image.name] = result
+                                        st.success("✅ 解析完成！")
+                                        st.rerun()
+                        else:
+                            st.info("🔄 批量解析进行中，请等待完成后再进行单独解析")
+                        
+                    except Exception as e:
+                        st.error(f"图片加载失败: {e}")
             
-            # 右侧：解析结果
+            # ========== 右侧：解析结果区域 ==========
             with right_col:
-                st.subheader("🤖 解析结果")
+                st.markdown("#### 🤖 解析结果")
                 
                 # 显示解析结果
                 if selected_image.name in st.session_state.image_results:
                     result = st.session_state.image_results[selected_image.name]
                     
-                    # 结果显示区域
-                    st.markdown("#### 📝 解析内容")
+                    # 结果状态
+                    st.success("✅ 解析完成")
                     
-                    # 使用可滚动的文本区域显示结果
+                    # 结果显示 - 使用可滚动的文本区域
                     st.text_area(
-                        "解析结果（JSON格式）",
+                        "JSON解析结果",
                         value=result,
                         height=400,
                         key=f"result_display_{selected_idx}",
-                        help="可以复制此内容"
+                        help="可以选中并复制此内容"
                     )
                     
                     # 操作按钮
                     result_col1, result_col2 = st.columns(2)
                     with result_col1:
-                        if st.button("📋 复制到剪贴板", key=f"copy_{selected_idx}"):
-                            st.success("✅ 结果已复制到剪贴板")
-                            # 这里可以添加实际的复制功能
+                        if st.button("📋 复制结果", key=f"copy_{selected_idx}", use_container_width=True):
+                            # 这里可以添加复制到剪贴板的功能
+                            st.success("✅ 结果已准备复制")
                     
                     with result_col2:
-                        if st.button("🗑️ 删除此结果", key=f"delete_{selected_idx}"):
+                        if st.button("🗑️ 删除结果", key=f"delete_{selected_idx}", use_container_width=True):
                             del st.session_state.image_results[selected_image.name]
                             st.success("✅ 已删除此解析结果")
                             st.rerun()
                 
                 elif st.session_state.batch_parsing and selected_idx == st.session_state.batch_completed:
                     # 正在解析当前图片
-                    st.info("🔄 正在解析此图片，请稍候...")
-                    st.spinner("AI解析中...")
+                    st.info("🔄 正在解析此图片...")
+                    with st.spinner("AI解析中，请稍候..."):
+                        st.empty()  # 占位符，显示加载动画
                 
                 elif st.session_state.batch_parsing and selected_idx < st.session_state.batch_completed:
                     # 应该已经解析但没有结果（可能失败了）
-                    st.warning("⚠️ 此图片解析可能失败，请尝试单独解析")
+                    st.warning("⚠️ 此图片解析失败")
+                    st.markdown("**可能原因：**")
+                    st.markdown("- 图片格式不支持")
+                    st.markdown("- 网络连接问题") 
+                    st.markdown("- API调用失败")
+                    
+                    if st.button("🔄 重新解析", key=f"retry_{selected_idx}"):
+                        with st.spinner("重新解析中..."):
+                            result = parse_single_image_display(selected_image, prompt, api_key, selected_idx + 1)
+                            if result:
+                                st.session_state.image_results[selected_image.name] = result
+                                st.success("✅ 重新解析完成！")
+                                st.rerun()
                 
                 else:
                     # 未解析
                     st.info("📋 暂无解析结果")
-                    st.markdown("请点击左侧的'解析此图片'按钮或使用批量解析功能")
+                    st.markdown("**操作建议：**")
+                    st.markdown("- 点击左侧'单独解析此图片'按钮")
+                    st.markdown("- 或使用顶部'批量解析'功能")
+                    
+                    # 显示在队列中的位置
+                    if st.session_state.batch_parsing:
+                        queue_position = selected_idx - st.session_state.batch_completed + 1
+                        if queue_position > 0:
+                            st.info(f"📍 排队中，还有 {queue_position} 张图片等待解析")
         
-        # 批量保存功能
+        # ==================== 底部：批量保存功能 ====================
         if save_results and st.session_state.image_results:
             save_batch_results(st.session_state.image_results)
 
