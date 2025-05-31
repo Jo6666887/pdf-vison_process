@@ -225,7 +225,15 @@ def init_session_state():
         'parsing_progress': {},
         'output_dir': OUTPUT_CONFIG["default_output_dir"],
         'selected_folder': None,
-        'processing': False
+        'processing': False,
+        # 图片解析相关状态
+        'image_results': {},
+        'batch_parsing': False,
+        'batch_progress': 0,
+        'batch_status': '',
+        'batch_total': 0,
+        'batch_completed': 0,
+        'batch_current_file': ''
     }
     
     for key, value in defaults.items():
@@ -797,23 +805,64 @@ def render_image_upload_and_parse():
             key="img_prompt"
         )
         
-        # 解析按钮
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            parse_single = st.button("🔍 解析选中", key="parse_single")
-        with col2:
-            parse_all = st.button("🚀 批量解析", key="parse_all") 
-        with col3:
-            save_results = st.button("💾 保存结果", key="save_results")
+        # 批量解析状态显示
+        if st.session_state.batch_parsing:
+            st.info("🔄 批量解析进行中，请勿刷新页面...")
+            
+            # 显示进度
+            progress_col1, progress_col2 = st.columns([3, 1])
+            with progress_col1:
+                progress_bar = st.progress(st.session_state.batch_progress)
+                st.text(f"进度: {st.session_state.batch_completed}/{st.session_state.batch_total}")
+            with progress_col2:
+                if st.button("⏹️ 停止解析", key="stop_batch"):
+                    st.session_state.batch_parsing = False
+                    st.session_state.batch_status = "用户停止"
+                    st.rerun()
+            
+            st.text(f"状态: {st.session_state.batch_status}")
+            if st.session_state.batch_current_file:
+                st.text(f"当前: {st.session_state.batch_current_file}")
         
-        # 图片选择和预览
-        if len(uploaded_images) > 1:
+        # 解析按钮（只在非批量解析状态下显示）
+        if not st.session_state.batch_parsing:
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col1:
+                parse_single = st.button("🔍 解析选中", key="parse_single")
+            with col2:
+                parse_all = st.button("🚀 批量解析", key="parse_all") 
+            with col3:
+                save_results = st.button("💾 保存结果", key="save_results")
+        else:
+            parse_single = False
+            parse_all = False
+            save_results = False
+        
+        # 启动批量解析
+        if parse_all and not st.session_state.batch_parsing:
+            start_batch_parsing(uploaded_images, prompt, api_key)
+            st.rerun()
+        
+        # 继续批量解析（如果正在进行中）
+        if st.session_state.batch_parsing:
+            continue_batch_parsing(uploaded_images, prompt, api_key)
+        
+        # 图片选择和预览（批量解析时禁用切换）
+        if len(uploaded_images) > 1 and not st.session_state.batch_parsing:
             selected_idx = st.selectbox(
                 "选择要预览的图片",
                 options=range(len(uploaded_images)),
                 format_func=lambda x: f"{uploaded_images[x].name}",
                 key="selected_image"
             )
+        elif len(uploaded_images) > 1:
+            # 批量解析时显示当前处理的图片索引
+            current_idx = st.session_state.batch_completed
+            if current_idx < len(uploaded_images):
+                selected_idx = current_idx
+                st.info(f"🔒 批量解析中，当前预览: {uploaded_images[selected_idx].name}")
+            else:
+                selected_idx = 0
         else:
             selected_idx = 0
         
@@ -839,51 +888,117 @@ def render_image_upload_and_parse():
             with col2:
                 st.subheader("🤖 解析结果")
                 
-                # 解析逻辑
-                result_container = st.container()
-                
-                # 自动解析或手动解析
-                should_parse = auto_parse or parse_single or parse_all
-                
-                if should_parse:
-                    with result_container:
-                        try:
-                            # 解析单张图片
-                            if parse_single or (auto_parse and len(uploaded_images) == 1):
-                                result = parse_single_image_display(selected_image, prompt, api_key, selected_idx + 1)
-                                if result:
-                                    # 存储结果到session state
-                                    if 'image_results' not in st.session_state:
-                                        st.session_state.image_results = {}
-                                    st.session_state.image_results[selected_image.name] = result
-                            
-                            # 批量解析
-                            elif parse_all:
-                                parse_all_images_display(uploaded_images, prompt, api_key)
-                                
-                        except Exception as e:
-                            st.error(f"解析失败: {e}")
+                # 单张解析
+                if parse_single and not st.session_state.batch_parsing:
+                    result = parse_single_image_display(selected_image, prompt, api_key, selected_idx + 1)
+                    if result:
+                        st.session_state.image_results[selected_image.name] = result
                 
                 # 显示已有结果
-                if 'image_results' in st.session_state and selected_image.name in st.session_state.image_results:
+                if selected_image.name in st.session_state.image_results:
                     result = st.session_state.image_results[selected_image.name]
                     st.markdown("### 📝 解析结果")
                     st.markdown(result)
                     
                     # 结果操作
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("📋 复制结果", key=f"copy_{selected_idx}"):
-                            st.write("结果已准备复制")
-                    with col2:
-                        if st.button("🗑️ 清除结果", key=f"clear_{selected_idx}"):
-                            if selected_image.name in st.session_state.image_results:
-                                del st.session_state.image_results[selected_image.name]
-                                st.rerun()
+                    if not st.session_state.batch_parsing:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("📋 复制结果", key=f"copy_{selected_idx}"):
+                                st.write("结果已准备复制")
+                        with col2:
+                            if st.button("🗑️ 清除结果", key=f"clear_{selected_idx}"):
+                                if selected_image.name in st.session_state.image_results:
+                                    del st.session_state.image_results[selected_image.name]
+                                    st.rerun()
+                else:
+                    st.info("暂无解析结果")
+        
+        # 显示所有解析结果摘要
+        if st.session_state.image_results:
+            st.markdown("---")
+            st.subheader("📊 解析结果摘要")
+            
+            total_images = len(uploaded_images)
+            completed_images = len(st.session_state.image_results)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("总图片数", total_images)
+            with col2:
+                st.metric("已解析", completed_images)
+            with col3:
+                completion_rate = (completed_images / total_images * 100) if total_images > 0 else 0
+                st.metric("完成率", f"{completion_rate:.1f}%")
+            with col4:
+                if st.button("🗑️ 清空所有结果", key="clear_all_results"):
+                    st.session_state.image_results = {}
+                    st.session_state.batch_parsing = False
+                    st.session_state.batch_completed = 0
+                    st.session_state.batch_progress = 0
+                    st.success("✅ 已清空所有解析结果")
+                    st.rerun()
+            
+            # 结果列表
+            with st.expander("📋 详细结果列表", expanded=False):
+                for filename, result in st.session_state.image_results.items():
+                    st.markdown(f"**{filename}**")
+                    st.markdown(result[:100] + "..." if len(result) > 100 else result)
+                    st.markdown("---")
         
         # 批量保存功能
-        if save_results and 'image_results' in st.session_state:
+        if save_results and st.session_state.image_results:
             save_batch_results(st.session_state.image_results)
+
+def start_batch_parsing(uploaded_files, prompt, api_key):
+    """启动批量解析"""
+    st.session_state.batch_parsing = True
+    st.session_state.batch_total = len(uploaded_files)
+    st.session_state.batch_completed = 0
+    st.session_state.batch_progress = 0
+    st.session_state.batch_status = "准备开始..."
+    st.session_state.batch_current_file = ""
+
+def continue_batch_parsing(uploaded_files, prompt, api_key):
+    """继续批量解析"""
+    if st.session_state.batch_completed >= st.session_state.batch_total:
+        # 解析完成
+        st.session_state.batch_parsing = False
+        st.session_state.batch_status = "✅ 批量解析完成！"
+        st.balloons()
+        return
+    
+    # 获取当前要处理的文件
+    current_idx = st.session_state.batch_completed
+    current_file = uploaded_files[current_idx]
+    
+    # 更新状态
+    st.session_state.batch_current_file = current_file.name
+    st.session_state.batch_status = f"解析中: {current_file.name}"
+    
+    # 检查是否已经解析过
+    if current_file.name not in st.session_state.image_results:
+        try:
+            # 解析当前图片
+            result = parse_single_image_display(current_file, prompt, api_key, current_idx + 1)
+            if result:
+                st.session_state.image_results[current_file.name] = result
+        except Exception as e:
+            st.error(f"解析 {current_file.name} 失败: {e}")
+    
+    # 更新进度
+    st.session_state.batch_completed += 1
+    st.session_state.batch_progress = st.session_state.batch_completed / st.session_state.batch_total
+    
+    # 如果还有未完成的，继续下一个
+    if st.session_state.batch_completed < st.session_state.batch_total:
+        # 使用st.rerun()继续下一个文件
+        time.sleep(0.1)  # 短暂延迟避免过快刷新
+        st.rerun()
+    else:
+        # 全部完成
+        st.session_state.batch_parsing = False
+        st.session_state.batch_status = "✅ 批量解析完成！"
 
 def parse_single_image_display(uploaded_file, prompt, api_key, page_num):
     """解析单张图片并显示结果"""
@@ -952,53 +1067,6 @@ def parse_single_image_display(uploaded_file, prompt, api_key, page_num):
         except Exception as e:
             st.error(f"❌ 解析失败: {str(e)}")
             return None
-
-def parse_all_images_display(uploaded_files, prompt, api_key):
-    """批量解析图片并显示进度"""
-    st.info(f"🚀 开始批量解析 {len(uploaded_files)} 张图片...")
-    
-    # 创建进度条
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    results_container = st.container()
-    
-    try:
-        ai_parser = AIParser(api_key=api_key, timeout=60)
-        
-        # 初始化结果存储
-        if 'image_results' not in st.session_state:
-            st.session_state.image_results = {}
-        
-        total_files = len(uploaded_files)
-        
-        for idx, uploaded_file in enumerate(uploaded_files):
-            # 更新进度
-            progress = (idx + 1) / total_files
-            progress_bar.progress(progress)
-            status_text.text(f"解析中: {uploaded_file.name} ({idx + 1}/{total_files})")
-            
-            try:
-                # 解析单张图片
-                result = parse_single_image_display(uploaded_file, prompt, api_key, idx + 1)
-                
-                if result:
-                    st.session_state.image_results[uploaded_file.name] = result
-                    
-                    # 在结果容器中显示
-                    with results_container:
-                        with st.expander(f"📄 {uploaded_file.name} - 解析结果"):
-                            st.markdown(result)
-                
-            except Exception as e:
-                st.error(f"解析 {uploaded_file.name} 失败: {e}")
-        
-        # 完成
-        progress_bar.progress(1.0)
-        status_text.text("✅ 批量解析完成！")
-        st.balloons()
-        
-    except Exception as e:
-        st.error(f"批量解析失败: {e}")
 
 def save_batch_results(results_dict):
     """保存批量解析结果"""
