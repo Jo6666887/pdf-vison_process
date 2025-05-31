@@ -111,15 +111,14 @@ class AIParser:
             
             success, content = self.parse_single_image(image_path, prompt, page_num)
             
-            # 保存结果
-            result_path = output_dir / f"{page_num}.txt"
+            # 保存结果（使用.json扩展名）
+            result_path = output_dir / f"{page_num}.json"
             
             if success:
-                # 保存成功结果
+                # 保存成功结果（纯净JSON格式）
                 with open(result_path, "w", encoding="utf-8") as f:
-                    f.write(f"=== 第 {page_num} 页解析结果 ===\n\n")
+                    # 只写入纯净的解析结果，不添加任何标题或时间戳
                     f.write(content)
-                    f.write(f"\n\n=== 解析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
                 
                 results[page_num] = {
                     'success': True,

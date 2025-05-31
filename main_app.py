@@ -1011,18 +1011,18 @@ def save_batch_results(results_dict):
         save_dir = Path(st.session_state.output_dir) / "图片解析结果" / datetime.now().strftime("%Y%m%d_%H%M%S")
         save_dir.mkdir(parents=True, exist_ok=True)
         
-        # 保存每个结果
+        # 保存每个结果（纯净JSON格式）
         for filename, result in results_dict.items():
             # 清理文件名
             safe_filename = filename.replace('/', '_').replace('\\', '_')
-            result_file = save_dir / f"{safe_filename}_解析结果.txt"
+            # 使用.json扩展名，表明这是JSON格式
+            result_file = save_dir / f"{safe_filename}.json"
             
             with open(result_file, 'w', encoding='utf-8') as f:
-                f.write(f"=== {filename} 解析结果 ===\n\n")
+                # 只写入纯净的解析结果，不添加任何标题或时间戳
                 f.write(result)
-                f.write(f"\n\n=== 解析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
         
-        # 创建汇总文件
+        # 创建汇总文件（保留原有格式用于查看）
         summary_file = save_dir / "_解析汇总.txt"
         with open(summary_file, 'w', encoding='utf-8') as f:
             f.write("图片解析结果汇总\n")
@@ -1036,7 +1036,7 @@ def save_batch_results(results_dict):
                 f.write(result[:200] + "...\n\n" if len(result) > 200 else result + "\n\n")
         
         st.success(f"✅ 解析结果已保存到: {save_dir}")
-        st.info(f"📁 共保存 {len(results_dict)} 个解析结果")
+        st.info(f"📁 共保存 {len(results_dict)} 个纯净JSON文件")
         
         # 清空结果
         if st.button("🗑️ 清空所有结果"):
